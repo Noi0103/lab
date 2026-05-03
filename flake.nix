@@ -49,6 +49,7 @@
           buildInputs = self.checks.${pkgs.stdenv.hostPlatform.system}.pre-commit-check.enabledPackages;
           packages = with pkgs; [
             nixfmt
+            nil
           ];
         };
       });
