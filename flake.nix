@@ -42,6 +42,7 @@
       nixosConfigurations = {
         nix-thinkpad = mkHost "nix-thinkpad";
       };
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           inherit (self.checks.${pkgs.stdenv.hostPlatform.system}.pre-commit-check) shellHook;

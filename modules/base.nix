@@ -14,7 +14,7 @@
   time.timeZone = "Europe/Berlin";
 
   environment.systemPackages = with pkgs; [
-    vim 
+    vim
     wget
     git
   ];
@@ -44,4 +44,3 @@
   system.stateVersion = "25.11"; # Did you read the comment?
 
 }
-

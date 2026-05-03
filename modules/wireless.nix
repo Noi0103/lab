@@ -5,7 +5,7 @@
     # provided file has to be in .env format
     ensureProfiles.environmentFiles = [ config.sops.secrets."network.env".path ];
   };
-  sops.secrets."network.env" = {};
+  sops.secrets."network.env" = { };
 
   networking.networkmanager.ensureProfiles.profiles = {
     "lab" = {
@@ -33,4 +33,3 @@
     };
   };
 }
-  
