@@ -1,3 +1,5 @@
 .envrc
 .pre-commit-config.yaml
 .direnv/
+
+/test
