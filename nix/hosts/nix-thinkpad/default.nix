@@ -7,6 +7,7 @@
     ../../modules/wireless.nix
     ../../modules/ssh.nix
     ../../modules/k3s-server.nix
+    ../../modules/flux.nix
     ../../modules/users/operator.nix
     ./hardware-configuration.nix
   ];

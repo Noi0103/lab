@@ -17,6 +17,8 @@
     vim
     wget
     git
+    fluxcd
+    net-tools
   ];
 
   # Copy the NixOS configuration file and link it from the resulting system
