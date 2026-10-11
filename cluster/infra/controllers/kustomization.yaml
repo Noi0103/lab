@@ -7,3 +7,4 @@ resources:
   - metallb
   - csi-driver-nfs
   - tailscale
+  - cloudnative-pg
