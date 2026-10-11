@@ -34,6 +34,8 @@
     };
   };
 
+  # A list, so it is appended to the upstream module's ExecStartPre (which
+  # copies configuration.yaml since NixOS 26.05) instead of conflicting with it.
   systemd.services.zigbee2mqtt.serviceConfig.ExecStartPre =
     let
       setupDevices = pkgs.writeShellScript "z2m-setup-devices" ''
@@ -45,7 +47,7 @@
         fi
       '';
     in
-    "+${setupDevices}";
+    [ "+${setupDevices}" ];
 
   services.zigbee2mqtt.enable = true;
   services.zigbee2mqtt = {
