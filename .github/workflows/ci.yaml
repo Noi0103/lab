@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: cachix/install-nix-action@v31.11.1
+      - name: flake check
+        working-directory: nix
+        run: nix flake check -L
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: cachix/install-nix-action@v31.11.1
+      - name: validate flux kustomizations
+        run: |
+          nix shell --inputs-from ./nix nixpkgs#kustomize nixpkgs#kubeconform --command bash -euo pipefail -c '
+            for dir in cluster/infra/controllers cluster/infra/configs cluster/apps; do
+              echo "::group::$dir"
+              kustomize build "$dir" | kubeconform -summary -ignore-missing-schemas \
+                -schema-location default \
+                -schema-location "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
+              echo "::endgroup::"
+            done
+          '

@@ -60,6 +60,10 @@ Conventions:
 - Kubernetes secrets: any YAML under `cluster/` encrypts only `data`/`stringData` with the operator key. Write the Secret in plaintext, then `sops -e -i cluster/path/to/secret.yaml` before committing (see `docs/SOPS.md`). Never commit an unencrypted secret; gitleaks runs as a pre-commit hook.
 - Flux decrypts using the `sops-age` secret, which `nix/secrets/sops-age.enc` provisions on server nodes.
 
+## CI
+
+`.github/workflows/ci.yaml` runs on GitHub-hosted runners on pushes to `master` and on PRs. Jobs: `nix flake check`, and `kustomize build | kubeconform` for each Flux stage, using tools pinned by `nix/flake.lock`.
+
 ## Dependency updates
 
 Renovate (`renovate.json`) manages Helm charts, images, flake inputs and anything annotated with a `# renovate: datasource=... depName=...` comment on the line above a version. Patch/digest and nix lock updates automerge; nixpkgs channel bumps, majors, and home-assistant chart bumps need manual review.
