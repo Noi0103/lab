@@ -1,0 +1,25 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bazarr
+  namespace: arr
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: bazarr-tls
+      hosts:
+        - bazarr.${EXTERNAL_DOMAIN}
+  rules:
+    - host: bazarr.${EXTERNAL_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bazarr
+                port:
+                  number: 6767

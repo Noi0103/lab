@@ -1,0 +1,130 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prowlarr
+  namespace: arr
+  labels:
+    app.kubernetes.io/name: prowlarr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prowlarr
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prowlarr
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-postgres
+          image: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/wait-for-postgres.sh", "prowlarr-main", "prowlarr-log"]
+          securityContext:
+            runAsUser: 26
+            runAsGroup: 26
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          env:
+            - name: PGHOST
+              value: postgres-rw.postgres.svc.cluster.local
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: prowlarr
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: prowlarr_db_password
+            - name: PGCONNECT_TIMEOUT
+              value: "3"
+          volumeMounts:
+            - name: wait-for-postgres
+              mountPath: /scripts
+              readOnly: true
+      containers:
+        - name: prowlarr
+          image: ghcr.io/linuxserver/prowlarr:2.6.5.5623-ls163
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 1Gi
+          env:
+            - name: TZ
+              value: Europe/Berlin
+            - name: PUID
+              value: "2000"
+            - name: PGID
+              value: "2000"
+            - name: PROWLARR__POSTGRES__HOST
+              value: postgres-rw.postgres.svc.cluster.local
+            - name: PROWLARR__POSTGRES__PORT
+              value: "5432"
+            - name: PROWLARR__POSTGRES__USER
+              value: prowlarr
+            - name: PROWLARR__POSTGRES__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: prowlarr_db_password
+            - name: PROWLARR__POSTGRES__MAINDB
+              value: prowlarr-main
+            - name: PROWLARR__POSTGRES__LOGDB
+              value: prowlarr-log
+            - name: PROWLARR__AUTH__APIKEY
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: prowlarr_api_key
+            # Case-sensitive enum parsing: an invalid value silently falls back to config.xml.
+            - name: PROWLARR__AUTH__METHOD
+              value: Forms
+            - name: PROWLARR__AUTH__REQUIRED
+              value: Enabled
+          ports:
+            - name: http
+              containerPort: 9696
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: prowlarr-config
+              mountPath: /config
+      volumes:
+        - name: "prowlarr-config"
+          persistentVolumeClaim:
+            claimName: prowlarr-config
+        - name: "wait-for-postgres"
+          configMap:
+            name: wait-for-postgres

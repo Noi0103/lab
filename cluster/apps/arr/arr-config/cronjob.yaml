@@ -1,0 +1,93 @@
+---
+# Wires Prowlarr -> Sonarr, the Sonarr/Prowlarr UI logins, Sonarr's root
+# folder and (once the qbittorrent_* keys are in secret arr) Sonarr ->
+# qBittorrent. A CronJob so that it recovers from apps that were not ready
+# and picks up new secret keys on its own; the script is idempotent and only
+# writes when something differs.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: arr-config
+  namespace: arr
+  labels:
+    app.kubernetes.io/name: arr-config
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: arr-config
+        spec:
+          enableServiceLinks: false
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 2000
+            runAsGroup: 2000
+          containers:
+            - name: arr-config
+              # Reused for its bash, curl and jq (linuxserver base image); already
+              # pulled for sonarr. Bypasses the s6 entrypoint.
+              image: ghcr.io/linuxserver/sonarr:4.0.20.3014-ls327
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "/scripts/arr-config.sh"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              env:
+                - name: SONARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: arr
+                      key: sonarr_api_key
+                - name: PROWLARR_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: arr
+                      key: prowlarr_api_key
+                - name: UI_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: arr
+                      key: arr_ui_username
+                - name: UI_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: arr
+                      key: arr_ui_password
+                # Optional: once added to secret arr, the next run sets up the client.
+                - name: QBITTORRENT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: arr
+                      key: qbittorrent_username
+                      optional: true
+                - name: QBITTORRENT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: arr
+                      key: qbittorrent_password
+                      optional: true
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: media
+                  mountPath: /media
+          volumes:
+            - name: scripts
+              configMap:
+                name: arr-config
+            - name: media
+              nfs:
+                server: ${NFS_HOST}
+                path: /tank/media

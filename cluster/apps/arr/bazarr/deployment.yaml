@@ -1,0 +1,172 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bazarr
+  namespace: arr
+  labels:
+    app.kubernetes.io/name: bazarr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bazarr
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bazarr
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-postgres
+          image: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/wait-for-postgres.sh", "bazarr"]
+          securityContext:
+            runAsUser: 26
+            runAsGroup: 26
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          env:
+            - name: PGHOST
+              value: postgres-rw.postgres.svc.cluster.local
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: bazarr
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: bazarr_db_password
+            - name: PGCONNECT_TIMEOUT
+              value: "3"
+          volumeMounts:
+            - name: wait-for-postgres
+              mountPath: /scripts
+              readOnly: true
+        - name: seed-config
+          image: docker.io/mikefarah/yq:4.54.1
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/seed-config.sh"]
+          securityContext:
+            # The fresh PVC dir is root-owned; the script chowns to 2000:2000.
+            runAsUser: 0
+            runAsGroup: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          env:
+            - name: BAZARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: bazarr_api_key
+            - name: SONARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: sonarr_api_key
+            - name: UI_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: arr_ui_username
+            - name: UI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: arr_ui_password
+          volumeMounts:
+            - name: bazarr-config
+              mountPath: /config
+            - name: seed-config
+              mountPath: /scripts
+              readOnly: true
+      containers:
+        - name: bazarr
+          image: ghcr.io/linuxserver/bazarr:v1.6.2-ls367
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          env:
+            - name: TZ
+              value: Europe/Berlin
+            - name: PUID
+              value: "2000"
+            - name: PGID
+              value: "2000"
+            - name: POSTGRES_ENABLED
+              value: "true"
+            - name: POSTGRES_HOST
+              value: postgres-rw.postgres.svc.cluster.local
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DATABASE
+              value: bazarr
+            - name: POSTGRES_USERNAME
+              value: bazarr
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: bazarr_db_password
+          ports:
+            - name: http
+              containerPort: 6767
+              protocol: TCP
+          # /api/system/ping is unauthenticated, unlike / with basic auth.
+          startupProbe:
+            httpGet:
+              path: /api/system/ping
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/system/ping
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/system/ping
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: bazarr-config
+              mountPath: /config
+            - name: bazarr-media
+              mountPath: /media
+      volumes:
+        - name: "bazarr-config"
+          persistentVolumeClaim:
+            claimName: bazarr-config
+        - name: "bazarr-media"
+          nfs:
+            server: ${NFS_HOST}
+            path: /tank/media
+        - name: "seed-config"
+          configMap:
+            name: bazarr-seed-config
+        - name: "wait-for-postgres"
+          configMap:
+            name: wait-for-postgres
