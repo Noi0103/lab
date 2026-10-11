@@ -77,6 +77,19 @@
       "automerge": false
     },
     {
+      "description": "CI action bumps are validated by the CI run on their own PR",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "ci",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true
+    },
+    {
       "description": "NixOS channel bumps need manual review",
       "matchManagers": [
         "nix"
