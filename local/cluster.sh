@@ -115,7 +115,7 @@ bootstrap() {
     jq --arg nfs "$node_ip" '.data.NFS_HOST = $nfs | .data.EXTERNAL_DOMAIN = "lab.test"' |
     kubectl apply -f - >/dev/null
 
-  kubectl kustomize --load-restrictor=LoadRestrictionsNone "$ROOT/local/flux" | kubectl apply -f - >/dev/null
+  apply_flux_sync
 
   log "waiting for local registry"
   local deadline=$((SECONDS + 300))
@@ -123,6 +123,12 @@ bootstrap() {
     ((SECONDS < deadline)) || die "registry not reachable at $REGISTRY"
     sleep 3
   done
+}
+
+# Flux stages + local patches (local/flux); re-applied on every sync so
+# changes to the patches take effect without recreating the VM.
+apply_flux_sync() {
+  kubectl kustomize --load-restrictor=LoadRestrictionsNone "$ROOT/local/flux" | kubectl apply -f - >/dev/null
 }
 
 cmd_sync() {
@@ -141,6 +147,7 @@ cmd_sync() {
     [[ -z $(git -C "$ROOT" status --porcelain -- cluster) ]] || log "syncing uncommitted changes in cluster/"
   fi
 
+  apply_flux_sync
   log "pushing ${ref:-working tree} to local registry"
   flux push artifact "oci://$REGISTRY/lab:local" --insecure-registry --path "$src" \
     --source "$(git -C "$ROOT" config --get remote.origin.url)" --revision "$revision" >/dev/null
