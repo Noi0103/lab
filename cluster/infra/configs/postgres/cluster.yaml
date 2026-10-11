@@ -1,0 +1,81 @@
+---
+# Shared PostgreSQL for the apps. One instance per optiplex on its local SSD
+# (local-path); CNPG handles streaming replication and failover.
+# Apps connect to postgres-rw.postgres.svc.cluster.local:5432.
+#
+# Node maintenance: with 2 instances CNPG keeps only a PDB on the primary
+# (minAvailable 1). Draining the replica's node passes right away. Draining
+# the primary's node blocks until CNPG has switched over to the replica,
+# which it does on its own once the node is cordoned. With no healthy replica
+# the drain stays blocked. local-path PVs are pinned to their node, so the
+# evicted instance stays Pending until that node is back; meanwhile the DB
+# runs on one instance. Check that both instances are healthy before draining.
+# nodeMaintenanceWindow {inProgress: true, reusePVC: true} only drops the
+# replica PDB, which CNPG does not create below 3 instances, so it is not
+# needed here. Never set reusePVC: false: CNPG would delete the PVC to
+# recreate the instance elsewhere, and there is no elsewhere (required
+# anti-affinity, 2 nodes).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: postgres
+spec:
+  instances: 2
+  # Pod terminationGracePeriodSeconds. CNPG's default (1800s) also makes the
+  # namespace controller wait 30 min before re-checking a deleted namespace,
+  # and stretches node drains; the small arr DBs shut down in seconds.
+  stopDelay: 300
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie
+  storage:
+    storageClass: local-path
+    size: 10Gi
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - nix-optiplex1
+                  - nix-optiplex2
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  postgresql:
+    parameters:
+      # Sized for the 1Gi memory limit.
+      max_connections: "100"
+      shared_buffers: 128MB
+      effective_cache_size: 512MB
+      work_mem: 4MB
+      maintenance_work_mem: 64MB
+      wal_buffers: 4MB
+      min_wal_size: 80MB
+      max_wal_size: 1GB
+      random_page_cost: "1.1"
+      effective_io_concurrency: "200"
+  managed:
+    roles:
+      - name: sonarr
+        ensure: present
+        login: true
+        passwordSecret:
+          name: postgres-sonarr
+      - name: prowlarr
+        ensure: present
+        login: true
+        passwordSecret:
+          name: postgres-prowlarr
+      - name: bazarr
+        ensure: present
+        login: true
+        passwordSecret:
+          name: postgres-bazarr

@@ -1,0 +1,19 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cronjob.yaml
+configMapGenerator:
+  # Substituted by Flux (EXTERNAL_DOMAIN); must not contain other dollar signs.
+  - name: configarr
+    namespace: arr
+    files:
+      - config.yml
+  - name: arr-host-config
+    namespace: arr
+    files:
+      - host-config.sh
+    options:
+      annotations:
+        # Flux would otherwise substitute the shell's $variables.
+        kustomize.toolkit.fluxcd.io/substitute: disabled

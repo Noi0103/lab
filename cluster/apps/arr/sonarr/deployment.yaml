@@ -19,9 +19,43 @@ spec:
         app.kubernetes.io/name: sonarr
     spec:
       enableServiceLinks: false
+      initContainers:
+        - name: wait-for-postgres
+          image: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/wait-for-postgres.sh", "sonarr-main", "sonarr-log"]
+          securityContext:
+            runAsUser: 26
+            runAsGroup: 26
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          env:
+            - name: PGHOST
+              value: postgres-rw.postgres.svc.cluster.local
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: sonarr
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: sonarr_db_password
+            - name: PGCONNECT_TIMEOUT
+              value: "3"
+          volumeMounts:
+            - name: wait-for-postgres
+              mountPath: /scripts
+              readOnly: true
       containers:
         - name: sonarr
-          image: ghcr.io/linuxserver/sonarr:4.0.20.3014-ls326
+          image: ghcr.io/linuxserver/sonarr:4.0.20.3014-ls327
           imagePullPolicy: IfNotPresent
           resources:
             requests:
@@ -37,6 +71,31 @@ spec:
               value: "2000"
             - name: PGID
               value: "2000"
+            - name: SONARR__POSTGRES__HOST
+              value: postgres-rw.postgres.svc.cluster.local
+            - name: SONARR__POSTGRES__PORT
+              value: "5432"
+            - name: SONARR__POSTGRES__USER
+              value: sonarr
+            - name: SONARR__POSTGRES__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: sonarr_db_password
+            - name: SONARR__POSTGRES__MAINDB
+              value: sonarr-main
+            - name: SONARR__POSTGRES__LOGDB
+              value: sonarr-log
+            - name: SONARR__AUTH__APIKEY
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: sonarr_api_key
+            # Case-sensitive enum parsing: an invalid value silently falls back to config.xml.
+            - name: SONARR__AUTH__METHOD
+              value: Forms
+            - name: SONARR__AUTH__REQUIRED
+              value: Enabled
           ports:
             - name: http
               containerPort: 8989
@@ -72,3 +131,6 @@ spec:
           nfs:
             server: ${NFS_HOST}
             path: /tank/media
+        - name: "wait-for-postgres"
+          configMap:
+            name: wait-for-postgres

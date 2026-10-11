@@ -7,3 +7,5 @@ resources:
   - traefik
   - csi-driver-nfs
   - tailscale
+  - postgres
+  - coredns

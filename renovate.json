@@ -41,6 +41,17 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\\n.*?[:=]\\s*\"?(?<currentValue>[^\"\\s]+)\"?"
       ]
+    },
+    {
+      "description": "CNPG Cluster.spec.imageName (key: repo:tag), not covered by the kubernetes manager",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)cluster/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "imageName:\\s*\"?(?<depName>[^:\\s\"]+):(?<currentValue>[^@\\s\"]+)(@(?<currentDigest>sha256:[a-f0-9]+))?\"?"
+      ],
+      "datasourceTemplate": "docker"
     }
   ],
   "packageRules": [
@@ -128,6 +139,30 @@
       "matchPackageNames": [
         "home-assistant"
       ],
+      "automerge": false
+    },
+    {
+      "description": "Cluster imageName and the backup CronJob image move together (pg_dump must be >= server)",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/cloudnative-pg/postgresql"
+      ],
+      "groupName": "postgresql"
+    },
+    {
+      "description": "PostgreSQL majors are an in-place major upgrade of the CNPG Cluster - approve and review manually",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/cloudnative-pg/postgresql"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true,
       "automerge": false
     }
   ]

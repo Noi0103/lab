@@ -57,8 +57,8 @@ local/cluster.sh kubectl ...   # inspect / poke the local cluster
 
 Three Flux Kustomizations defined in `nix/config/manifests/flux-sync.yaml`, applied in order via `dependsOn`:
 
-1. `cluster/infra/controllers` — HelmRepository + HelmRelease per controller (cert-manager, metallb, csi-driver-nfs, tailscale operator, kube-prometheus-stack).
-2. `cluster/infra/configs` — CRs/config that need those controllers (ClusterIssuers, IP pools, StorageClass, traefik HelmChartConfig, tailscale ProxyGroup).
+1. `cluster/infra/controllers` — HelmRepository + HelmRelease per controller (cert-manager, metallb, csi-driver-nfs, tailscale operator, kube-prometheus-stack, cloudnative-pg).
+2. `cluster/infra/configs` — CRs/config that need those controllers (ClusterIssuers, IP pools, StorageClass, traefik HelmChartConfig, tailscale ProxyGroup, CNPG Postgres cluster).
 3. `cluster/apps` — workloads.
 
 Each directory has a `kustomization.yaml`; a new component must be added to its parent's `resources` list or Flux will ignore it.
@@ -70,6 +70,8 @@ Conventions:
 - **Public exposure**: only routes that add the `public` entrypoint (`traefik.ingress.kubernetes.io/router.entrypoints: websecure,public`) are reachable from the internet. Path: VPS `nix-netcup-chiller` (HAProxy SNI passthrough in `modules/edge-relay.nix`) → Tailscale → `traefik-public` service → traefik `public` entrypoint (PROXY protocol). Everything else is LAN/tailnet only.
 - **Storage**: dynamic PVCs via StorageClass `nfs-tank` (NFS on `/tank/k8s`); pre-existing data (e.g. `/tank/media`) is mounted with static PV/PVC pairs using `claimRef`/`volumeName`.
 - ServiceMonitors need label `release: observability` to be scraped.
+- **In-cluster app URLs**: app-to-app and tool-to-app traffic uses the ingress URLs `https://<app>.${EXTERNAL_DOMAIN}`, not `*.svc.cluster.local`; CoreDNS (`cluster/infra/configs/coredns/`) resolves `*.${EXTERNAL_DOMAIN}` to traefik's ClusterIP. Exception: Postgres (`postgres-rw.postgres.svc.cluster.local`, plain TCP).
+- **PostgreSQL**: one shared CNPG `Cluster` `postgres` in `cluster/infra/configs/postgres/` (2 instances on local-path, nix-optiplex1/2). Apps connect to `postgres-rw.postgres.svc.cluster.local:5432`; a new app gets a role in `managed.roles` (basic-auth Secret `postgres-<app>` in ns `postgres`, copy the password into the app's namespace) plus `Database` CRs. CronJob `postgres-backup` writes nightly `pg_dump -Fc` per DB to PVC `postgres-backups` (nfs-tank, 7 days); add new DBs to its script.
 
 ## Secrets (SOPS + age)
 

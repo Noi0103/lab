@@ -1,0 +1,43 @@
+# Configarr config (https://configarr.de). Flux substitutes EXTERNAL_DOMAIN and
+# QBITTORRENT_ENABLED; no other dollar signs may appear in this file.
+# Secrets come from env (!env).
+# All URLs go through the ingress; CoreDNS resolves *.EXTERNAL_DOMAIN to
+# traefik inside the cluster (cluster/infra/configs/coredns).
+
+sonarr:
+  sonarr:
+    base_url: https://sonarr.${EXTERNAL_DOMAIN}
+    api_key: !env SONARR_API_KEY
+    # Declarative: root folders not listed here are removed.
+    root_folders:
+      - /media/tv
+    download_clients:
+      data:
+        - name: qBittorrent
+          type: qbittorrent
+          # Flux substitution; false only on the local cluster (no qBittorrent
+          # there), which also makes Configarr skip Sonarr's connection test.
+          enable: ${QBITTORRENT_ENABLED:=true}
+          fields:
+            host: q.${EXTERNAL_DOMAIN}
+            port: 443
+            use_ssl: true
+            username: !env QBITTORRENT_USERNAME
+            password: !env QBITTORRENT_PASSWORD
+            tv_category: tv-sonarr
+
+prowlarr:
+  prowlarr:
+    base_url: https://prowlarr.${EXTERNAL_DOMAIN}
+    api_key: !env PROWLARR_API_KEY
+    applications:
+      data:
+        - name: Sonarr
+          type: Sonarr
+          sync_level: fullSync
+          fields:
+            prowlarrUrl: https://prowlarr.${EXTERNAL_DOMAIN}
+            baseUrl: https://sonarr.${EXTERNAL_DOMAIN}
+            apiKey: !env SONARR_API_KEY
+            syncCategories: [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5090]
+            animeSyncCategories: [5070]

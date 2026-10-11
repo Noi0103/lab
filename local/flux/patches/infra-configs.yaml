@@ -36,3 +36,12 @@ spec:
         metadata:
           name: traefik-public
           namespace: kube-system
+    # Single node: required anti-affinity would leave the second instance Pending.
+    - target:
+        group: postgresql.cnpg.io
+        kind: Cluster
+        name: postgres
+      patch: |-
+        - op: replace
+          path: /spec/affinity/podAntiAffinityType
+          value: preferred

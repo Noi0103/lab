@@ -1,0 +1,201 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bazarr
+  namespace: arr
+  labels:
+    app.kubernetes.io/name: bazarr
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bazarr
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bazarr
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-postgres
+          image: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/scripts/wait-for-postgres.sh", "bazarr"]
+          securityContext:
+            runAsUser: 26
+            runAsGroup: 26
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          env:
+            - name: PGHOST
+              value: postgres-rw.postgres.svc.cluster.local
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: bazarr
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: bazarr_db_password
+            - name: PGCONNECT_TIMEOUT
+              value: "3"
+          volumeMounts:
+            - name: wait-for-postgres
+              mountPath: /scripts
+              readOnly: true
+        # Bazarr only retries its Sonarr SignalR feed on connection errors; the
+        # ingress answers 503 while Sonarr is not ready, which leaves the live
+        # feed down until Bazarr restarts. Reconnects after that are automatic.
+        # -k: reachability check only, no credentials (local certs are self-signed).
+        - name: wait-for-sonarr
+          image: ghcr.io/linuxserver/bazarr:v1.6.2-ls367
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - until curl -fsk -m 5 -o /dev/null "https://sonarr.${EXTERNAL_DOMAIN}/ping"; do echo "waiting for sonarr"; sleep 5; done
+          securityContext:
+            runAsUser: 2000
+            runAsGroup: 2000
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: bazarr
+          image: ghcr.io/linuxserver/bazarr:v1.6.2-ls367
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          env:
+            # Bazarr calls Sonarr with verify=False, so urllib3 warns on every request.
+            - name: PYTHONWARNINGS
+              value: "ignore:Unverified HTTPS request"
+            - name: TZ
+              value: Europe/Berlin
+            - name: PUID
+              value: "2000"
+            - name: PGID
+              value: "2000"
+            - name: POSTGRES_ENABLED
+              value: "true"
+            - name: POSTGRES_HOST
+              value: postgres-rw.postgres.svc.cluster.local
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DATABASE
+              value: bazarr
+            - name: POSTGRES_USERNAME
+              value: bazarr
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: bazarr_db_password
+            # Bazarr has no settings env vars of its own, but its Dynaconf still
+            # reads DYNACONF_<section>__<key> and overrides config.yaml with it
+            # (the file is rewritten with these values on start). Keys must be
+            # lowercase; values are TOML-parsed, so secrets get "@str " (an
+            # all-digit key or hash would otherwise become an int). $(VAR)
+            # refers to the env vars above (Kubernetes expansion).
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: bazarr_api_key
+            - name: SONARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: sonarr_api_key
+            - name: UI_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: arr_ui_username
+            # Form login compares md5(password) as hex with auth.password.
+            - name: UI_PASSWORD_MD5
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: arr_ui_password_md5
+            - name: DYNACONF_auth__apikey
+              value: "@str $(API_KEY)"
+            - name: DYNACONF_auth__type
+              value: form
+            - name: DYNACONF_auth__username
+              value: "@str $(UI_USERNAME)"
+            - name: DYNACONF_auth__password
+              value: "@str $(UI_PASSWORD_MD5)"
+            - name: DYNACONF_general__use_sonarr
+              value: "true"
+            # Through the ingress like a browser (CoreDNS hairpins it to
+            # traefik). Bazarr does not verify Sonarr's certificate.
+            - name: DYNACONF_sonarr__ip
+              value: sonarr.${EXTERNAL_DOMAIN}
+            - name: DYNACONF_sonarr__port
+              value: "443"
+            - name: DYNACONF_sonarr__ssl
+              value: "true"
+            - name: DYNACONF_sonarr__base_url
+              value: /
+            - name: DYNACONF_sonarr__apikey
+              value: "@str $(SONARR_API_KEY)"
+          ports:
+            - name: http
+              containerPort: 6767
+              protocol: TCP
+          # /api/system/ping is unauthenticated, unlike / with basic auth.
+          startupProbe:
+            httpGet:
+              path: /api/system/ping
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/system/ping
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/system/ping
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: bazarr-config
+              mountPath: /config
+            - name: bazarr-media
+              mountPath: /media
+      volumes:
+        - name: "bazarr-config"
+          persistentVolumeClaim:
+            claimName: bazarr-config
+        - name: "bazarr-media"
+          nfs:
+            server: ${NFS_HOST}
+            path: /tank/media
+        - name: "wait-for-postgres"
+          configMap:
+            name: wait-for-postgres

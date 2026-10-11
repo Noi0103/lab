@@ -60,8 +60,9 @@ local/cluster.sh up        # VM + k3s + flux, then syncs the working tree (~10 m
 
 ## What is different on purpose
 
-Everything that would touch something shared with prod is patched out in
-`local/flux/patches/` (the only place for such overrides):
+Everything that would touch something shared with prod, or that the single
+node cannot satisfy, is patched in `local/flux/patches/` (the only place for
+such overrides):
 
 - **Tailscale**: operator, its OAuth secret, the ProxyGroup and `traefik-public`
   are removed; they would join the real tailnet.
@@ -69,6 +70,13 @@ Everything that would touch something shared with prod is patched out in
   removed, so no ACME requests or DNS-01 records.
 - **gluetun**: scaled to 0 and its secret removed; a second peer with prod's
   Mullvad WireGuard key breaks prod's tunnel.
+- **PostgreSQL (CNPG)**: `podAntiAffinityType` is `preferred` instead of
+  `required`, so both instances fit on the single node and replication is
+  still exercised.
+- **arr-config CronJob**: talks to the apps through their (self-signed)
+  ingress URLs, so TLS validation is relaxed: `CERT_VALIDATION=disabledForLocalAddresses`
+  for Sonarr/Prowlarr, `CURL_INSECURE` for the host-config step and
+  `NODE_TLS_REJECT_UNAUTHORIZED=0` for Configarr.
 
 If you add something that talks to an external account with prod credentials,
 add an override there in the same change.

@@ -1,0 +1,121 @@
+---
+# Nightly logical backups of the app databases to the ZFS mirror (nfs-tank,
+# /tank/k8s/postgres-postgres-backups, covered by the ZFS auto-snapshots).
+# One custom-format dump per DB and night: <db>/<db>-<timestamp>.dump, kept 7 days.
+#
+# Restore (scale the app to 0 first; --clean drops and recreates its objects;
+# <primary> = status.currentPrimary of the Cluster, e.g. postgres-1):
+#   ssh nix-optiplex1 sudo cat /tank/k8s/postgres-postgres-backups/<db>/<file>.dump | kubectl -n postgres exec -i <primary> -c postgres -- pg_restore --clean --if-exists --no-owner --role=<owner> -d <db>
+# (No dollar signs in this file outside the ConfigMap: infra-configs runs postBuild substitution.)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backups
+  namespace: postgres
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nfs-tank
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-backup
+  namespace: postgres
+  annotations:
+    # Keep Flux postBuild substitution away from the shell variables below.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  backup.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    umask 077
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    # <db>:<owner>; the owner's password comes from PGPASSWORD_<OWNER>.
+    for entry in sonarr-main:sonarr sonarr-log:sonarr prowlarr-main:prowlarr prowlarr-log:prowlarr bazarr:bazarr; do
+      db=${entry%%:*}
+      owner=${entry#*:}
+      pw_var="PGPASSWORD_${owner^^}"
+      mkdir -p "/backups/$db"
+      out="/backups/$db/$db-$stamp.dump"
+      echo "dumping $db as $owner"
+      PGPASSWORD=${!pw_var} pg_dump -h postgres-rw -U "$owner" -d "$db" -Fc -f "$out.tmp"
+      mv "$out.tmp" "$out"
+    done
+    echo "pruning dumps older than 7 days"
+    find /backups -name '*.dump' -type f -mtime +6 -print -delete
+    find /backups -name '*.tmp' -type f -mtime +0 -print -delete
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: postgres
+spec:
+  schedule: "30 3 * * *"
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            # postgres user of the CNPG images
+            runAsUser: 26
+            runAsGroup: 26
+            fsGroup: 26
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              # Same image as the Cluster: pg_dump must not be older than the server.
+              image: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie
+              command: [/bin/bash, /scripts/backup.sh]
+              env:
+                - name: PGPASSWORD_SONARR
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-sonarr
+                      key: password
+                - name: PGPASSWORD_PROWLARR
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-prowlarr
+                      key: password
+                - name: PGPASSWORD_BAZARR
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-bazarr
+                      key: password
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: postgres-backups
+            - name: scripts
+              configMap:
+                name: postgres-backup

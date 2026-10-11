@@ -5,6 +5,11 @@ metadata:
   name: apps
   namespace: flux-system
 spec:
+  postBuild:
+    substitute:
+      # qBittorrent (gluetun) does not run locally: keep Sonarr's download
+      # client disabled so Configarr saves it without a connection test.
+      QBITTORRENT_ENABLED: "false"
   patches:
     # A second peer with prod's Mullvad WireGuard key would break prod's tunnel.
     - target:
@@ -21,3 +26,35 @@ spec:
         metadata:
           name: gluetun
           namespace: gluetun
+    # Local certificates are self-signed (see infra-configs), so TLS to the
+    # apps' ingress URLs cannot be validated. Sonarr/Prowlarr skip validation
+    # for hosts that resolve to private addresses (CoreDNS hairpins them to
+    # traefik's ClusterIP); curl and Configarr (Node) skip it entirely.
+    # target: makes this a no-op where the CronJob does not exist (sync <ref>).
+    - target:
+        kind: CronJob
+        name: arr-config
+        namespace: arr
+      patch: |-
+        apiVersion: batch/v1
+        kind: CronJob
+        metadata:
+          name: arr-config
+          namespace: arr
+        spec:
+          jobTemplate:
+            spec:
+              template:
+                spec:
+                  initContainers:
+                    - name: host-config
+                      env:
+                        - name: CERT_VALIDATION
+                          value: disabledForLocalAddresses
+                        - name: CURL_INSECURE
+                          value: "1"
+                  containers:
+                    - name: configarr
+                      env:
+                        - name: NODE_TLS_REJECT_UNAUTHORIZED
+                          value: "0"
