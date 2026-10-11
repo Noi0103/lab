@@ -1,0 +1,48 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(kubectl apply *)",
+      "Bash(kubectl create *)",
+      "Bash(kubectl replace *)",
+      "Bash(kubectl patch *)",
+      "Bash(kubectl edit *)",
+      "Bash(kubectl delete *)",
+      "Bash(kubectl scale *)",
+      "Bash(kubectl rollout *)",
+      "Bash(kubectl set *)",
+      "Bash(kubectl label *)",
+      "Bash(kubectl annotate *)",
+      "Bash(kubectl taint *)",
+      "Bash(kubectl cordon *)",
+      "Bash(kubectl uncordon *)",
+      "Bash(kubectl drain *)",
+      "Bash(kubectl exec *)",
+      "Bash(kubectl run *)",
+      "Bash(kubectl cp *)",
+      "Bash(helm install *)",
+      "Bash(helm upgrade *)",
+      "Bash(helm uninstall *)",
+      "Bash(helm rollback *)",
+      "Bash(flux reconcile *)",
+      "Bash(flux suspend *)",
+      "Bash(flux resume *)",
+      "Bash(flux create *)",
+      "Bash(flux delete *)",
+      "Bash(flux install *)",
+      "Bash(flux uninstall *)",
+      "Bash(flux bootstrap *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(gh pr merge *)",
+      "Bash(./scripts/rebuild.sh *)",
+      "Bash(nix/scripts/rebuild.sh *)",
+      "Bash(nixos-rebuild *)",
+      "Bash(ssh *)"
+    ],
+    "allow": [
+      "Bash(./local/cluster.sh *)",
+      "Bash(local/cluster.sh *)"
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-configs
+  namespace: flux-system
+spec:
+  patches:
+    # Self-signed instead of Let's Encrypt: no ACME rate limits, no DNS-01
+    # records in the real Cloudflare zone.
+    - target:
+        kind: ClusterIssuer
+      patch: |-
+        - op: replace
+          path: /spec
+          value:
+            selfSigned: {}
+    - patch: |-
+        $patch: delete
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: cloudflare
+          namespace: cert-manager
+    # Tailscale CRs; the operator is not installed locally.
+    - patch: |-
+        $patch: delete
+        apiVersion: tailscale.com/v1alpha1
+        kind: ProxyGroup
+        metadata:
+          name: ingress
+    - patch: |-
+        $patch: delete
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: traefik-public
+          namespace: kube-system

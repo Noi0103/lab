@@ -26,7 +26,24 @@ nix build .#nixosConfigurations.<host>.config.system.build.toplevel   # evaluate
 ./scripts/rebuild.sh <host>                 # deploy: builds and switches on operator@<host>.lab over SSH
 ```
 
-Cluster changes have no local apply step — push to `master` and Flux reconciles. To sanity-check a kustomization locally: `kubectl kustomize cluster/apps/<app>` (note `${VAR}` placeholders stay unsubstituted).
+Merging to `master` deploys to prod. Verify every change on the local test cluster first; see `docs/LOCAL.md`:
+
+```sh
+local/cluster.sh up            # once: lima VM with prod's k3s + flux
+local/cluster.sh check         # CI checks + eval of all hosts + flake check
+local/cluster.sh sync master   # start from prod's current state
+local/cluster.sh sync          # apply working tree, wait until healthy (exit 1 + report if not)
+local/cluster.sh diff          # read-only diff of the working tree against prod
+local/cluster.sh kubectl ...   # inspect / poke the local cluster
+```
+
+## Working on this repo (for Claude)
+
+- Never mutate the prod cluster. Against prod only read-only commands (`get`, `describe`, `logs`, `flux get`, `local/cluster.sh diff`). Mutating `kubectl`/`helm`/`flux` commands are denied in `.claude/settings.json`; go through `local/cluster.sh`, which only ever uses the local kubeconfig.
+- Work on a feature branch or worktree, never on `master`.
+- A cluster change is done when `check` passes, `sync master` then `sync` exits 0, and `diff` shows only the intended changes. Report the diff in the PR.
+- Local-only overrides live in `local/flux/patches/` and nowhere else. A new component that uses prod credentials against an external service (tailnet, VPN, ACME/DNS) needs an override there.
+- NixOS changes can only be evaluated locally. Deploying hosts (`rebuild.sh`) and pushing/merging are left to the user.
 
 ## NixOS architecture
 
@@ -67,3 +84,10 @@ Conventions:
 ## Dependency updates
 
 Renovate (`renovate.json`) manages Helm charts, images, flake inputs and anything annotated with a `# renovate: datasource=... depName=...` comment on the line above a version. Patch/digest and nix lock updates automerge; nixpkgs channel bumps, majors, and home-assistant chart bumps need manual review.
+
+## Shared brain
+
+Multi-agent knowledge shared across `~/repos`; rules in `~/repos/brain/RULES.md`.
+
+@~/repos/brain/RULES.md
+@~/repos/brain/INDEX.md

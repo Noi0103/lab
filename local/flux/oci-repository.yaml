@@ -1,0 +1,12 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: lab
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  url: oci://registry.local-registry.svc.cluster.local:5050/lab
+  ref:
+    tag: local
+  insecure: true
