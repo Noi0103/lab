@@ -4,10 +4,15 @@ kind: Kustomization
 resources:
   - cronjob.yaml
 configMapGenerator:
-  - name: arr-config
+  # Substituted by Flux (EXTERNAL_DOMAIN); must not contain other dollar signs.
+  - name: configarr
     namespace: arr
     files:
-      - arr-config.sh
+      - config.yml
+  - name: arr-host-config
+    namespace: arr
+    files:
+      - host-config.sh
     options:
       annotations:
         # Flux would otherwise substitute the shell's $variables.

@@ -73,6 +73,10 @@ such overrides):
 - **PostgreSQL (CNPG)**: `podAntiAffinityType` is `preferred` instead of
   `required`, so both instances fit on the single node and replication is
   still exercised.
+- **arr-config CronJob**: talks to the apps through their (self-signed)
+  ingress URLs, so TLS validation is relaxed: `CERT_VALIDATION=disabledForLocalAddresses`
+  for Sonarr/Prowlarr, `CURL_INSECURE` for the host-config step and
+  `NODE_TLS_REJECT_UNAUTHORIZED=0` for Configarr.
 
 If you add something that talks to an external account with prod credentials,
 add an override there in the same change.

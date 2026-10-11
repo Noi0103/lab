@@ -53,48 +53,6 @@ spec:
             - name: wait-for-postgres
               mountPath: /scripts
               readOnly: true
-        - name: seed-config
-          image: docker.io/mikefarah/yq:4.54.1
-          imagePullPolicy: IfNotPresent
-          command: ["/bin/sh", "/scripts/seed-config.sh"]
-          securityContext:
-            # The fresh PVC dir is root-owned; the script chowns to 2000:2000.
-            runAsUser: 0
-            runAsGroup: 0
-          resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
-          env:
-            - name: BAZARR_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: arr
-                  key: bazarr_api_key
-            - name: SONARR_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: arr
-                  key: sonarr_api_key
-            - name: UI_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: arr
-                  key: arr_ui_username
-            - name: UI_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: arr
-                  key: arr_ui_password
-          volumeMounts:
-            - name: bazarr-config
-              mountPath: /config
-            - name: seed-config
-              mountPath: /scripts
-              readOnly: true
       containers:
         - name: bazarr
           image: ghcr.io/linuxserver/bazarr:v1.6.2-ls367
@@ -128,6 +86,55 @@ spec:
                 secretKeyRef:
                   name: arr
                   key: bazarr_db_password
+            # Bazarr has no settings env vars of its own, but its Dynaconf still
+            # reads DYNACONF_<section>__<key> and overrides config.yaml with it
+            # (the file is rewritten with these values on start). Keys must be
+            # lowercase; values are TOML-parsed, so secrets get "@str " (an
+            # all-digit key or hash would otherwise become an int). $(VAR)
+            # refers to the env vars above (Kubernetes expansion).
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: bazarr_api_key
+            - name: SONARR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: sonarr_api_key
+            - name: UI_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: arr_ui_username
+            # Form login compares md5(password) as hex with auth.password.
+            - name: UI_PASSWORD_MD5
+              valueFrom:
+                secretKeyRef:
+                  name: arr
+                  key: arr_ui_password_md5
+            - name: DYNACONF_auth__apikey
+              value: "@str $(API_KEY)"
+            - name: DYNACONF_auth__type
+              value: form
+            - name: DYNACONF_auth__username
+              value: "@str $(UI_USERNAME)"
+            - name: DYNACONF_auth__password
+              value: "@str $(UI_PASSWORD_MD5)"
+            - name: DYNACONF_general__use_sonarr
+              value: "true"
+            # Through the ingress like a browser (CoreDNS hairpins it to
+            # traefik). Bazarr does not verify Sonarr's certificate.
+            - name: DYNACONF_sonarr__ip
+              value: sonarr.${EXTERNAL_DOMAIN}
+            - name: DYNACONF_sonarr__port
+              value: "443"
+            - name: DYNACONF_sonarr__ssl
+              value: "true"
+            - name: DYNACONF_sonarr__base_url
+              value: /
+            - name: DYNACONF_sonarr__apikey
+              value: "@str $(SONARR_API_KEY)"
           ports:
             - name: http
               containerPort: 6767
@@ -164,9 +171,6 @@ spec:
           nfs:
             server: ${NFS_HOST}
             path: /tank/media
-        - name: "seed-config"
-          configMap:
-            name: bazarr-seed-config
         - name: "wait-for-postgres"
           configMap:
             name: wait-for-postgres
