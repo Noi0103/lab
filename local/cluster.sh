@@ -10,7 +10,10 @@ REGISTRY=127.0.0.1:5050
 TIMEOUT=${LOCAL_TIMEOUT:-900}
 
 # Prod is only ever read (diff); everything else goes to the local kubeconfig.
-PROD_KUBECONFIG=${KUBECONFIG:-$HOME/.kube/config}
+# Pinned to the sops-managed prod kubeconfig, not the current context.
+PROD_KUBECONFIG=${LAB_PROD_KUBECONFIG:-$HOME/.kube/lab}
+# Where the lab-local context is registered for kubecm/kubectx.
+KUBECM_CONFIG=${KUBECM_CONFIG:-$HOME/.kube/config}
 export KUBECONFIG="$STATE/kubeconfig"
 
 log() { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
@@ -55,12 +58,36 @@ cmd_up() {
       ;;
   esac
 
-  sed 's/: default$/: lab-local/' \
-    "$(limactl list --format '{{.Dir}}' "$VM")/copied-from-guest/kubeconfig.yaml" >"$KUBECONFIG"
+  (umask 077 && sed 's/: default$/: lab-local/' \
+    "$(limactl list --format '{{.Dir}}' "$VM")/copied-from-guest/kubeconfig.yaml" >"$KUBECONFIG")
+  chmod 600 "$KUBECONFIG"
+  register_context
   kubectl wait --for=condition=Ready node --all --timeout=300s >/dev/null
 
   bootstrap
   cmd_sync "$@"
+}
+
+# Replaces the lab-local context in $KUBECM_CONFIG (certs change on recreate).
+register_context() {
+  local tmp
+  unregister_context
+  tmp=$(mktemp "$KUBECM_CONFIG.XXXXXX")
+  KUBECONFIG="$KUBECM_CONFIG:$KUBECONFIG" kubectl config view --flatten >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$KUBECM_CONFIG"
+  log "context lab-local registered in $KUBECM_CONFIG (kubecm switch lab-local)"
+}
+
+unregister_context() {
+  local k
+  [[ -f $KUBECM_CONFIG ]] || return 0
+  if [[ $(KUBECONFIG=$KUBECM_CONFIG kubectl config current-context 2>/dev/null) == lab-local ]]; then
+    KUBECONFIG=$KUBECM_CONFIG kubectl config unset current-context >/dev/null
+  fi
+  for k in context cluster user; do
+    KUBECONFIG=$KUBECM_CONFIG kubectl config "delete-$k" lab-local >/dev/null 2>&1 || true
+  done
 }
 
 # Same pieces nix/modules/flux.nix drops into k3s's manifests dir on prod.
@@ -218,8 +245,11 @@ cmd_check() {
 
 # Read-only server-side dry run of the working tree against prod.
 cmd_diff() {
-  need flux
-  log "diffing against $(KUBECONFIG=$PROD_KUBECONFIG kubectl config current-context) ($PROD_KUBECONFIG)"
+  need flux kubectl
+  local server
+  server=$(KUBECONFIG=$PROD_KUBECONFIG kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+  [[ $server != *127.0.0.1* ]] || die "$PROD_KUBECONFIG points at the local cluster ($server)"
+  log "diffing against $server ($PROD_KUBECONFIG)"
   local ks rc=0
   for ks in infra-controllers:cluster/infra/controllers infra-configs:cluster/infra/configs apps:cluster/apps; do
     log "${ks%%:*}"
@@ -254,7 +284,7 @@ case $cmd in
   kubectl | flux | k9s) require_cluster; exec "$cmd" "$@" ;;
   shell) exec limactl shell "$VM" "$@" ;;
   stop) limactl stop "$VM" ;;
-  destroy) limactl delete --force "$VM"; rm -f "$KUBECONFIG" ;;
+  destroy) limactl delete --force "$VM"; rm -f "$KUBECONFIG"; unregister_context ;;
   help | -h | --help) usage ;;
   *) usage >&2; exit 1 ;;
 esac

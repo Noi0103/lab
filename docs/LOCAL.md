@@ -38,6 +38,11 @@ local/cluster.sh up        # VM + k3s + flux, then syncs the working tree (~10 m
 7. **Merge and watch** — after merging, watch `flux get ks` / `flux get hr -A`
    on prod. Roll back with `git revert` + merge, never by editing the cluster.
 
+`up` also registers a `lab-local` context in `~/.kube/config` (override with
+`KUBECM_CONFIG`), so `kubecm switch lab-local` / `kubectx lab-local` work;
+`destroy` removes it again. `diff` always uses `~/.kube/lab` (override with
+`LAB_PROD_KUBECONFIG`), never the current context.
+
 `local/cluster.sh stop` keeps the VM for next time; `destroy` deletes it.
 
 ## How it maps to prod
