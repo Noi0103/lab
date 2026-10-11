@@ -70,7 +70,7 @@ Conventions:
 - **Public exposure**: only routes that add the `public` entrypoint (`traefik.ingress.kubernetes.io/router.entrypoints: websecure,public`) are reachable from the internet. Path: VPS `nix-netcup-chiller` (HAProxy SNI passthrough in `modules/edge-relay.nix`) → Tailscale → `traefik-public` service → traefik `public` entrypoint (PROXY protocol). Everything else is LAN/tailnet only.
 - **Storage**: dynamic PVCs via StorageClass `nfs-tank` (NFS on `/tank/k8s`); pre-existing data (e.g. `/tank/media`) is mounted with static PV/PVC pairs using `claimRef`/`volumeName`.
 - ServiceMonitors need label `release: observability` to be scraped.
-- **PostgreSQL**: one shared CNPG `Cluster` `postgres` in `cluster/infra/configs/postgres/` (2 instances on local-path, nix-optiplex1/2). Apps connect to `postgres-rw.postgres.svc.cluster.local:5432`; a new app gets a role in `managed.roles` (basic-auth Secret `postgres-<app>` in ns `postgres`, copy the password into the app's namespace) plus `Database` CRs. CronJob `postgres-backup` writes nightly `pg_dump -Fc` per DB to PVC `postgres-backups` (nfs-tank, 14 days); add new DBs to its script.
+- **PostgreSQL**: one shared CNPG `Cluster` `postgres` in `cluster/infra/configs/postgres/` (2 instances on local-path, nix-optiplex1/2). Apps connect to `postgres-rw.postgres.svc.cluster.local:5432`; a new app gets a role in `managed.roles` (basic-auth Secret `postgres-<app>` in ns `postgres`, copy the password into the app's namespace) plus `Database` CRs. CronJob `postgres-backup` writes nightly `pg_dump -Fc` per DB to PVC `postgres-backups` (nfs-tank, 7 days); add new DBs to its script.
 
 ## Secrets (SOPS + age)
 

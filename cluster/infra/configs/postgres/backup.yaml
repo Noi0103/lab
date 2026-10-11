@@ -1,7 +1,7 @@
 ---
 # Nightly logical backups of the app databases to the ZFS mirror (nfs-tank,
 # /tank/k8s/postgres-postgres-backups, covered by the ZFS auto-snapshots).
-# One custom-format dump per DB and night: <db>/<db>-<timestamp>.dump, kept 14 days.
+# One custom-format dump per DB and night: <db>/<db>-<timestamp>.dump, kept 7 days.
 #
 # Restore (scale the app to 0 first; --clean drops and recreates its objects;
 # <primary> = status.currentPrimary of the Cluster, e.g. postgres-1):
@@ -44,8 +44,8 @@ data:
       PGPASSWORD=${!pw_var} pg_dump -h postgres-rw -U "$owner" -d "$db" -Fc -f "$out.tmp"
       mv "$out.tmp" "$out"
     done
-    echo "pruning dumps older than 14 days"
-    find /backups -name '*.dump' -type f -mtime +13 -print -delete
+    echo "pruning dumps older than 7 days"
+    find /backups -name '*.dump' -type f -mtime +6 -print -delete
     find /backups -name '*.tmp' -type f -mtime +0 -print -delete
 ---
 apiVersion: batch/v1
