@@ -1,0 +1,129 @@
+# Single-node stand-in for the k3s cluster, driven by local/cluster.sh.
+# Mirrors prod where it matters for manifests: same k3s version and flags
+# (nix/modules/k3s-server.nix), an NFS server exporting /tank like
+# nix/modules/nfs-server.nix, plus an in-cluster OCI registry that Flux
+# pulls the working tree from instead of GitHub.
+minimumLimaVersion: 2.0.0
+
+base: template:_images/ubuntu-lts
+
+vmType: vz
+cpus: 4
+memory: 8GiB
+disk: 60GiB
+
+mounts: []
+containerd:
+  system: false
+  user: false
+
+portForwards:
+  - guestPort: 6443 # kube-apiserver
+  - guestPort: 5050 # local-registry
+  - guestIP: 0.0.0.0
+    proto: any
+    ignore: true
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -e /var/lib/rancher/k3s && exit 0
+
+      # NFS server standing in for nix-optiplex1:/tank.
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y nfs-kernel-server
+      groupadd -g 2000 media
+      useradd -r -u 2000 -g media media
+      install -d -m 0775 -o media -g media /tank/media
+      install -d -m 0755 /tank/k8s
+      cat >/etc/exports <<'EOF'
+      /tank/media *(rw,async,no_subtree_check,all_squash,anonuid=2000,anongid=2000)
+      /tank/k8s   *(rw,sync,no_subtree_check,no_root_squash)
+      EOF
+      cat >/etc/nfs.conf.d/lab.conf <<'EOF'
+      [nfsd]
+      vers3=n
+      vers4.0=y
+      vers4.1=n
+      vers4.2=y
+      EOF
+      systemctl restart nfs-server
+
+      # Registry for `flux push artifact`; reachable from the host through
+      # the 5050 port forward and from Flux through the Service.
+      install -d /var/lib/rancher/k3s/server/manifests /var/lib/local-registry
+      cat >/var/lib/rancher/k3s/server/manifests/local-registry.yaml <<'EOF'
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: local-registry
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: registry
+        namespace: local-registry
+      spec:
+        selector:
+          matchLabels: {app: registry}
+        template:
+          metadata:
+            labels: {app: registry}
+          spec:
+            hostNetwork: true
+            containers:
+              - name: registry
+                image: registry:{{.Param.registryVersion}}
+                env:
+                  - {name: REGISTRY_HTTP_ADDR, value: ":5050"}
+                volumeMounts:
+                  - {name: data, mountPath: /var/lib/registry}
+            volumes:
+              - name: data
+                hostPath: {path: /var/lib/local-registry}
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: registry
+        namespace: local-registry
+      spec:
+        selector: {app: registry}
+        ports:
+          - {port: 5050}
+      EOF
+
+      curl -sfL "https://raw.githubusercontent.com/k3s-io/k3s/{{.Param.k3sVersion}}/install.sh" \
+        | INSTALL_K3S_VERSION="{{.Param.k3sVersion}}" sh -s - server \
+            --cluster-init \
+            --disable=servicelb \
+            --node-name={{.Param.nodeName}} \
+            --write-kubeconfig-mode=644
+
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 30s bash -c "until test -f /etc/rancher/k3s/k3s.yaml; do sleep 3; done"; then
+        echo >&2 "k3s is not running yet"
+        exit 1
+      fi
+    hint: |
+      Check "limactl shell lab-local sudo journalctl -u k3s" or
+      /var/log/cloud-init-output.log in the guest.
+
+copyToHost:
+  - guest: /etc/rancher/k3s/k3s.yaml
+    host: "{{.Dir}}/copied-from-guest/kubeconfig.yaml"
+    deleteOnStop: true
+
+param:
+  # Set by local/cluster.sh from the flake (prod's services.k3s.package).
+  k3sVersion: ""
+  # jellyfin pins itself to nix-optiplex2 via nodeSelector.
+  nodeName: nix-optiplex2
+  # renovate: datasource=docker depName=registry
+  registryVersion: 3.1.2

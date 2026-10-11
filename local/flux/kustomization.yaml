@@ -1,0 +1,25 @@
+---
+# Local variant of nix/config/manifests/flux-sync.yaml: same three stages, but
+# sourced from the local registry and with the patches below that keep the
+# local cluster away from anything shared with prod.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../nix/config/manifests/flux-sync.yaml
+  - oci-repository.yaml
+patches:
+  - path: patches/drop-git-repository.yaml
+  - target:
+      group: kustomize.toolkit.fluxcd.io
+      kind: Kustomization
+    patch: |-
+      - op: replace
+        path: /spec/sourceRef/kind
+        value: OCIRepository
+      # Converge faster after first-install health check timeouts.
+      - op: add
+        path: /spec/retryInterval
+        value: 1m
+  - path: patches/infra-controllers.yaml
+  - path: patches/infra-configs.yaml
+  - path: patches/apps.yaml
