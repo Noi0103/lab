@@ -10,7 +10,7 @@ sonarr:
     api_key: !env SONARR_API_KEY
     # Declarative: root folders not listed here are removed.
     root_folders:
-      - /media/tv
+      - /media/library/shows
     download_clients:
       data:
         - name: qBittorrent

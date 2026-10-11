@@ -3,7 +3,7 @@
 # Sonarr root folder on the media share and sets each app's forms login and
 # certificate validation (stored in the app DB, no env var exists for it).
 set -euo pipefail
-mkdir -p /media/tv
+mkdir -p /media/library/shows
 c() { curl -fsS --max-time 20 --retry 12 --retry-delay 5 --retry-all-errors ${CURL_INSECURE:+-k} "$@"; }
 for app in sonarr/v3/"$SONARR_API_KEY" prowlarr/v1/"$PROWLARR_API_KEY"; do
   IFS=/ read -r name ver key <<<"$app"
