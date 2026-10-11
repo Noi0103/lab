@@ -1,0 +1,16 @@
+---
+# Hairpin for in-cluster clients: <app>.${EXTERNAL_DOMAIN} resolves to
+# traefik's ClusterIP instead of the public/LAN address, so apps talk to each
+# other through the same ingress URLs (and certificates) as browsers do.
+# k3s's CoreDNS imports /etc/coredns/custom/*.override from this optional
+# ConfigMap; its reload plugin hashes the Corefile with imports expanded, so
+# changes are picked up without a restart. `answer auto` rewrites the answer
+# back to the queried name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  external-domain.override: |
+    rewrite stop name regex ^(.+)\.${EXTERNAL_DOMAIN}\.$ traefik.kube-system.svc.cluster.local. answer auto
