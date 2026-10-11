@@ -53,6 +53,28 @@ spec:
             - name: wait-for-postgres
               mountPath: /scripts
               readOnly: true
+        # Bazarr only retries its Sonarr SignalR feed on connection errors; the
+        # ingress answers 503 while Sonarr is not ready, which leaves the live
+        # feed down until Bazarr restarts. Reconnects after that are automatic.
+        # -k: reachability check only, no credentials (local certs are self-signed).
+        - name: wait-for-sonarr
+          image: ghcr.io/linuxserver/bazarr:v1.6.2-ls367
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - until curl -fsk -m 5 -o /dev/null "https://sonarr.${EXTERNAL_DOMAIN}/ping"; do echo "waiting for sonarr"; sleep 5; done
+          securityContext:
+            runAsUser: 2000
+            runAsGroup: 2000
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       containers:
         - name: bazarr
           image: ghcr.io/linuxserver/bazarr:v1.6.2-ls367
@@ -65,6 +87,9 @@ spec:
               cpu: 500m
               memory: 1Gi
           env:
+            # Bazarr calls Sonarr with verify=False, so urllib3 warns on every request.
+            - name: PYTHONWARNINGS
+              value: "ignore:Unverified HTTPS request"
             - name: TZ
               value: Europe/Berlin
             - name: PUID
