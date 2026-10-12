@@ -1,5 +1,5 @@
-# Configarr config (https://configarr.de). Flux substitutes EXTERNAL_DOMAIN and
-# QBITTORRENT_ENABLED; no other dollar signs may appear in this file.
+# Configarr config (https://configarr.de). Flux substitutes EXTERNAL_DOMAIN; no
+# other dollar signs may appear in this file.
 # Secrets come from env (!env).
 # All URLs go through the ingress; CoreDNS resolves *.EXTERNAL_DOMAIN to
 # traefik inside the cluster (cluster/infra/configs/coredns).
@@ -15,9 +15,7 @@ sonarr:
       data:
         - name: qBittorrent
           type: qbittorrent
-          # Flux substitution; false only on the local cluster (no qBittorrent
-          # there), which also makes Configarr skip Sonarr's connection test.
-          enable: ${QBITTORRENT_ENABLED:=true}
+          enable: true
           fields:
             host: q.${EXTERNAL_DOMAIN}
             port: 443

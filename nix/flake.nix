@@ -64,6 +64,25 @@
             nixd
           ];
         };
+
+        # Tools for local/cluster.sh (docs/LOCAL.md), which re-execs itself in
+        # this shell so versions come from flake.lock and not from the host.
+        local = pkgs.mkShell {
+          LAB_LOCAL_SHELL = "1";
+          packages = with pkgs; [
+            curl
+            fluxcd
+            jq
+            k9s
+            kubeconform
+            kubectl
+            kustomize
+            lima
+            rsync
+            sops
+            wireguard-tools
+          ];
+        };
       });
 
       checks = forAllSystems (pkgs: {
