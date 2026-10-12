@@ -27,7 +27,12 @@ spec:
       type: Recreate
     replicaCount: 1
     image:
-      pullPolicy: IfNotPresent  
+      # The chart defaults to its appVersion (10.11.8 in 3.2.0), which Renovate
+      # cannot see. 10.11.11 is the last 10.11 release; 12.x needs a manual
+      # migration (#41) and Renovate does not offer it from a three-part tag.
+      # renovate: datasource=docker depName=docker.io/jellyfin/jellyfin
+      tag: "10.11.11"
+      pullPolicy: IfNotPresent
     ingress:
       enabled: true
       className: 'traefik'
