@@ -16,11 +16,15 @@ let
 in
 {
   disko.devices = {
+    # By id, never /dev/sdX: those names move between boots (the root SSD has
+    # been both sda and sdb). All four disks hang off the add-on SATA card
+    # (PCI 02:00.0); the port is the ata-N in /dev/disk/by-path. Each mirror
+    # pairs a 2.5" with a 3.5" disk.
     disk = {
-      hdd1 = mkDataDisk "/dev/sdb"; # 2.5" samsung
-      hdd2 = mkDataDisk "/dev/sdc"; # 2.5" toshiba
-      hdd3 = mkDataDisk "/dev/sdd"; # 3.5" seagate
-      hdd4 = mkDataDisk "/dev/sde"; # 3.5" seagate
+      hdd1 = mkDataDisk "/dev/disk/by-id/ata-ST1000LM024_HN-M101MBB_S2RUJ9DD125574"; # 2.5" Samsung M8, mirror-0, ata-6
+      hdd2 = mkDataDisk "/dev/disk/by-id/ata-TOSHIBA_MQ01ABD100_24JTS1W1S"; # 2.5" Toshiba, mirror-1, ata-5
+      hdd3 = mkDataDisk "/dev/disk/by-id/ata-ST1000DM010-2EP102_ZN1CC0FG"; # 3.5" Seagate, mirror-0, ata-4
+      hdd4 = mkDataDisk "/dev/disk/by-id/ata-ST1000DM010-2EP102_ZN1C964P"; # 3.5" Seagate, mirror-1, ata-3
     };
 
     zpool.tank = {
