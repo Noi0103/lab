@@ -18,6 +18,40 @@ jobs:
         working-directory: nix
         run: nix flake check -L
 
+  host-list:
+    runs-on: ubuntu-latest
+    outputs:
+      hosts: ${{ steps.list.outputs.hosts }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: cachix/install-nix-action@v31.11.1
+      - id: list
+        working-directory: nix
+        run: echo "hosts=$(nix eval --json .#nixosConfigurations --apply builtins.attrNames)" >> "$GITHUB_OUTPUT"
+
+  hosts:
+    needs: host-list
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ${{ fromJSON(needs.host-list.outputs.hosts) }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: cachix/install-nix-action@v31.11.1
+      - name: evaluate ${{ matrix.host }}
+        working-directory: nix
+        run: nix eval --raw .#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel.drvPath
+
+  # Single stable name for branch protection; the matrix above changes with the host list.
+  hosts-ok:
+    needs: hosts
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: all hosts evaluate
+        run: test "${{ needs.hosts.result }}" = success
+
   manifests:
     runs-on: ubuntu-latest
     steps:
