@@ -1,6 +1,11 @@
 # Health of the tank pool (disko/tank.nix): SMART self-tests, SMART metrics for
 # Prometheus (cluster/infra/configs/monitoring/) and ZFS event notifications.
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   # smartd -s schedules (T/MM/DD/d/HH): a short test weekly and a long test
   # monthly, each disk on its own days so mirror partners never test together,
@@ -21,6 +26,9 @@ in
       options = "-s ${schedule}";
     }) selfTests;
   };
+
+  # smartctl for checking a disk by hand.
+  environment.systemPackages = [ pkgs.smartmontools ];
 
   # Scans every disk, the root SSD included.
   services.prometheus.exporters.smartctl = {
