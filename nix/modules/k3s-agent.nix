@@ -1,4 +1,9 @@
-{ config, cluster, ... }:
+{
+  config,
+  pkgs,
+  cluster,
+  ...
+}:
 
 {
   boot.supportedFilesystems = [ "nfs" ];
@@ -7,6 +12,7 @@
 
   services.k3s = {
     enable = true;
+    package = pkgs.k3s_1_35;
     role = "agent";
     tokenFile = config.sops.secrets."k3s.agent.token".path;
     serverAddr = "https://${cluster.serverHost}:6443";

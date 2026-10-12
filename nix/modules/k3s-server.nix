@@ -1,6 +1,7 @@
 {
   config,
   lib,
+  pkgs,
   cluster,
   ...
 }:
@@ -27,6 +28,7 @@ in
 
     services.k3s = {
       enable = true;
+      package = pkgs.k3s_1_35;
       role = "server";
       clusterInit = cfg.clusterInit;
       serverAddr = lib.mkIf (!cfg.clusterInit) "https://${cluster.serverHost}:6443";
