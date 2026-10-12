@@ -1,0 +1,113 @@
+---
+# Pool state from node-exporter, disk health from smartctl_exporter
+# (scrape-smartctl.yaml). sdX names move between boots, so SMART alerts carry
+# the disk's serial; nix/disko/tank.nix maps serials to mirrors. Data errors and
+# finished scrubs are reported by zed (ntfy), which has no metric here.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: disk-health
+  namespace: monitoring
+  labels:
+    release: observability
+  annotations:
+    # $labels in the templates below must reach Prometheus verbatim.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  groups:
+    - name: zfs
+      rules:
+        - alert: ZfsPoolNotOnline
+          expr: node_zfs_zpool_state{state!="online"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: ZFS pool {{ $labels.zpool }} on {{ $labels.instance }} is {{ $labels.state }}
+
+    - name: smart
+      rules:
+        - alert: SmartFailing
+          expr: |
+            smartctl_device_smart_status
+              * on (instance, device) group_left (model_name, serial_number) smartctl_device
+            == 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.model_name }} {{ $labels.serial_number }} fails its SMART health check"
+
+        # Exit status bit 1: device open failed, bit 2: SMART command failed.
+        # Either means the exporter cannot see the disk's SMART data at all.
+        - alert: SmartUnreadable
+          expr: smartctl_device_smartctl_exit_status % 8 >= 2
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: smartctl cannot read SMART data of {{ $labels.device }} on {{ $labels.instance }}
+
+        # Sectors the disk could not read; non-zero on a healthy disk only
+        # until they are rewritten or reallocated.
+        - alert: SmartUnreadableSectors
+          expr: |
+            smartctl_device_attribute{attribute_name=~"Current_Pending_Sector|Offline_Uncorrectable", attribute_value_type="raw"}
+              * on (instance, device) group_left (model_name, serial_number) smartctl_device
+            > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.model_name }} {{ $labels.serial_number }}: {{ $value }} {{ $labels.attribute_name }}"
+
+        # Old disks may carry a stable count from before they came here; only
+        # growth means the disk is still wearing out.
+        - alert: SmartReallocatedSectorsGrowing
+          expr: |
+            (
+              smartctl_device_attribute{attribute_name="Reallocated_Sector_Ct", attribute_value_type="raw"}
+              - min_over_time(smartctl_device_attribute{attribute_name="Reallocated_Sector_Ct", attribute_value_type="raw"}[1d])
+            )
+              * on (instance, device) group_left (model_name, serial_number) smartctl_device
+            > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.model_name }} {{ $labels.serial_number }} reallocated {{ $value }} sectors in the last day"
+
+        - alert: SmartCrcErrorsGrowing
+          expr: |
+            (
+              smartctl_device_attribute{attribute_name="UDMA_CRC_Error_Count", attribute_value_type="raw"}
+              - min_over_time(smartctl_device_attribute{attribute_name="UDMA_CRC_Error_Count", attribute_value_type="raw"}[1d])
+            )
+              * on (instance, device) group_left (model_name, serial_number) smartctl_device
+            > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.model_name }} {{ $labels.serial_number }}: {{ $value }} new link CRC errors in the last day"
+            description: CRC errors come from the link, not the platters; check the cable, the cage and the SATA card.
+
+        - alert: SmartSelfTestFailed
+          expr: |
+            (
+              smartctl_device_self_test_log_error_count
+              - min_over_time(smartctl_device_self_test_log_error_count[1d])
+            )
+              * on (instance, device) group_left (model_name, serial_number) smartctl_device
+            > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.model_name }} {{ $labels.serial_number }} failed a SMART self-test"
+
+        - alert: SmartTemperatureHigh
+          expr: |
+            smartctl_device_temperature{temperature_type="current"}
+              * on (instance, device) group_left (model_name, serial_number) smartctl_device
+            > 50
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.model_name }} {{ $labels.serial_number }} is at {{ $value }} °C"

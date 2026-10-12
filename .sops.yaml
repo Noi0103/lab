@@ -43,6 +43,12 @@ creation_rules:
       - *operator
       - *nix-optiplex2
 
+  - path_regex: nix/secrets/zed.yaml
+    key_groups:
+    - age:
+      - *operator
+      - *nix-optiplex1
+
   - path_regex: nix/secrets/tailscale.yaml
     key_groups:
     - age:

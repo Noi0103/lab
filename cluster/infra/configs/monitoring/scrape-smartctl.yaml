@@ -1,0 +1,14 @@
+---
+# smartctl_exporter on the NFS host (nix/modules/tank-health.nix), outside the
+# cluster: SMART data of the tank disks and the root SSD.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: smartctl
+  namespace: monitoring
+  labels:
+    release: observability
+spec:
+  staticConfigs:
+    - targets:
+        - ${NFS_HOST}:9633

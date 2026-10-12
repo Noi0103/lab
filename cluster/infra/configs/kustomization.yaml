@@ -9,3 +9,4 @@ resources:
   - tailscale
   - postgres
   - coredns
+  - monitoring
