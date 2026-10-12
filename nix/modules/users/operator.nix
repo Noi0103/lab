@@ -10,4 +10,6 @@ in
     isNormalUser = true;
     extraGroups = [ "wheel" ];
   };
+  # Lets rebuild.sh copy closures built on another host (unsigned paths).
+  nix.settings.trusted-users = [ "operator" ];
 }
