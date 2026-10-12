@@ -5,20 +5,12 @@ metadata:
   name: apps
   namespace: flux-system
 spec:
-  postBuild:
-    substitute:
-      # qBittorrent (gluetun) does not run locally: keep Sonarr's download
-      # client disabled so Configarr saves it without a connection test.
-      QBITTORRENT_ENABLED: "false"
   patches:
-    # A second peer with prod's Mullvad WireGuard key would break prod's tunnel.
-    - target:
-        kind: Deployment
-        name: gluetun
-      patch: |-
-        - op: replace
-          path: /spec/replicas
-          value: 0
+    # A second peer with prod's Mullvad WireGuard key would break prod's
+    # tunnel, so gluetun connects to a local WireGuard server instead
+    # (local/fixtures/vpn-endpoint.yaml) as a `custom` provider. The gluetun
+    # Secret is not Flux's: local/cluster.sh creates it with generated keys
+    # and the qBittorrent login from the arr secret.
     - patch: |-
         $patch: delete
         apiVersion: v1
@@ -26,6 +18,58 @@ spec:
         metadata:
           name: gluetun
           namespace: gluetun
+    - target:
+        kind: Deployment
+        name: gluetun
+      patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: gluetun
+          namespace: gluetun
+        spec:
+          template:
+            spec:
+              initContainers:
+                - name: gluetun
+                  env:
+                    - name: VPN_SERVICE_PROVIDER
+                      value: custom
+                    - name: SERVER_CITIES
+                      $patch: delete
+                    - name: WIREGUARD_ENDPOINT_IP
+                      value: 10.43.0.51
+                    - name: WIREGUARD_ENDPOINT_PORT
+                      value: "51820"
+                    - name: WIREGUARD_PUBLIC_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: gluetun
+                          key: wireguard_public_key
+              # Prod's WebUI login was set by hand; a fresh local PVC needs it
+              # seeded (local/fixtures/qbittorrent-login.sh).
+              containers:
+                - name: qbittorrent
+                  volumeMounts:
+                    - name: qbittorrent-init
+                      mountPath: /custom-cont-init.d
+                      readOnly: true
+                    - name: qbittorrent-login
+                      mountPath: /run/qbittorrent-login
+                      readOnly: true
+              volumes:
+                - name: qbittorrent-init
+                  configMap:
+                    name: qbittorrent-init
+                    defaultMode: 0755
+                - name: qbittorrent-login
+                  secret:
+                    secretName: gluetun
+                    items:
+                      - key: qbittorrent_username
+                        path: qbittorrent_username
+                      - key: qbittorrent_password
+                        path: qbittorrent_password
     # Local certificates are self-signed (see infra-configs), so TLS to the
     # apps' ingress URLs cannot be validated. Sonarr/Prowlarr skip validation
     # for hosts that resolve to private addresses (CoreDNS hairpins them to

@@ -4,6 +4,13 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# Tools come from the flake's `local` devShell (pinned by nix/flake.lock).
+if [[ -z ${LAB_LOCAL_SHELL:-} ]]; then
+  command -v nix >/dev/null || { echo "error: nix is required (see docs/LOCAL.md)" >&2; exit 1; }
+  exec nix develop "$ROOT/nix#local" --command "$ROOT/local/cluster.sh" "$@"
+fi
+
 VM=lab-local
 STATE="$ROOT/local/.state"
 REGISTRY=127.0.0.1:5050
@@ -131,6 +138,40 @@ apply_flux_sync() {
   kubectl kustomize --load-restrictor=LoadRestrictionsNone "$ROOT/local/flux" | kubectl apply -f - >/dev/null
 }
 
+# Local stand-ins for external services (local/fixtures) and their Secrets.
+# The WireGuard keys are generated once and kept in $STATE/vpn; the gluetun
+# Secret also carries the qBittorrent login Sonarr uses, from the arr secret.
+apply_fixtures() {
+  need wg sops
+  local vpn="$STATE/vpn" k
+  mkdir -p "$vpn"
+  for k in server client; do
+    [[ -s $vpn/$k.key ]] || (umask 077 && wg genkey >"$vpn/$k.key")
+    wg pubkey <"$vpn/$k.key" >"$vpn/$k.pub"
+  done
+
+  kubectl kustomize "$ROOT/local/fixtures" | apply_local
+  jq -n --rawfile server "$vpn/server.key" --rawfile client "$vpn/client.pub" '{
+    apiVersion: "v1", kind: "Secret",
+    metadata: {name: "vpn-endpoint", namespace: "local-fixtures"},
+    stringData: {server_private_key: $server, client_public_key: $client}
+  }' | apply_local
+  sops -d --extract '["stringData"]' --output-type json "$ROOT/cluster/apps/arr/secret.yaml" |
+    jq --rawfile client "$vpn/client.key" --rawfile server "$vpn/server.pub" '{
+      apiVersion: "v1", kind: "Secret",
+      metadata: {name: "gluetun", namespace: "gluetun"},
+      stringData: {
+        wireguard_private_key: ($client | rtrimstr("\n")),
+        wireguard_public_key: ($server | rtrimstr("\n")),
+        wireguard_addresses: "10.64.0.2/32",
+        qbittorrent_username, qbittorrent_password
+      }
+    }' | apply_local
+}
+
+# Server-side, so it shares objects with Flux (the gluetun namespace) cleanly.
+apply_local() { kubectl apply --server-side --force-conflicts --field-manager=local-cluster -f - >/dev/null; }
+
 cmd_sync() {
   need flux kubectl jq git rsync
   require_cluster
@@ -148,6 +189,7 @@ cmd_sync() {
   fi
 
   apply_flux_sync
+  apply_fixtures
   log "pushing ${ref:-working tree} to local registry"
   flux push artifact "oci://$REGISTRY/lab:local" --insecure-registry --path "$src" \
     --source "$(git -C "$ROOT" config --get remote.origin.url)" --revision "$revision" >/dev/null
@@ -232,6 +274,103 @@ cmd_status() {
   report "$(unhealthy)"
 }
 
+# End-to-end checks of the workloads that talk to local/fixtures stand-ins.
+cmd_verify() {
+  need kubectl jq
+  require_cluster
+  verify_gluetun
+  log "verify passed"
+}
+
+# qBittorrent behind gluetun: traffic leaves through the tunnel, nothing gets
+# out while the tunnel is down (kill switch) and it recovers, the WebUI takes
+# Sonarr's login on its ingress, and Sonarr's download client test passes.
+verify_gluetun() {
+  local domain size=2000000 before after deadline
+  domain=$(kubectl -n flux-system get configmap cluster-settings -o jsonpath='{.data.EXTERNAL_DOMAIN}')
+  kubectl -n gluetun rollout status deployment/gluetun --timeout=300s >/dev/null || die "gluetun is not available"
+  kubectl -n local-fixtures rollout status deployment/vpn-endpoint --timeout=120s >/dev/null || die "vpn-endpoint is not available"
+
+  log "gluetun: qbittorrent's traffic goes through the tunnel"
+  before=$(endpoint_tx)
+  qbittorrent curl -fsS -m 30 -o /dev/null "https://speed.cloudflare.com/__down?bytes=$size" ||
+    die "qbittorrent has no internet access through gluetun"
+  after=$(endpoint_tx)
+  ((after - before >= size)) || die "download worked but only $((after - before)) bytes passed the VPN endpoint (leak?)"
+
+  # gluetun notices a dead tunnel after ~3 min (periodic healthcheck) and then
+  # restarts the VPN, which rebuilds routes and firewall: the moment a leak
+  # would happen. Probe until 30s past that restart.
+  log "gluetun: kill switch (tunnel down until gluetun has restarted the VPN, ~3 min)"
+  local since restarted=""
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  trap 'endpoint ip link set wg0 up >/dev/null 2>&1 || true' EXIT
+  endpoint ip link set wg0 down
+  deadline=$((SECONDS + 300))
+  while [[ -z $restarted ]] || ((SECONDS < restarted + 30)); do
+    # By IP, so a missing DNS answer cannot hide a leak.
+    ! qbittorrent curl -fsS -m 5 -o /dev/null https://1.1.1.1/cdn-cgi/trace 2>/dev/null ||
+      die "qbittorrent reached the internet with the tunnel down"
+    if [[ -z $restarted ]] && kubectl -n gluetun logs deployment/gluetun -c gluetun --since-time="$since" | grep -q 'restarting VPN'; then
+      restarted=$SECONDS
+    fi
+    [[ -n $restarted ]] || ((SECONDS < deadline)) || die "gluetun did not restart the VPN within 300s of the tunnel going down"
+    sleep 3
+  done
+  endpoint ip link set wg0 up
+  trap - EXIT
+
+  log "gluetun: traffic resumes once the tunnel is back"
+  deadline=$((SECONDS + 300))
+  until qbittorrent curl -fsS -m 5 -o /dev/null https://1.1.1.1/cdn-cgi/trace 2>/dev/null; do
+    ((SECONDS < deadline)) || die "gluetun did not recover within 300s"
+    sleep 5
+  done
+
+  log "qbittorrent: WebUI login on https://q.$domain"
+  local out
+  # Credentials go in on stdin; $u/$p/$1 expand in the pod.
+  # shellcheck disable=SC2016
+  out=$(kubectl -n gluetun get secret gluetun -o json |
+    jq -r '.data | (.qbittorrent_username, .qbittorrent_password) | @base64d' |
+    endpoint_stdin sh -c 'read -r u; read -r p; curl -sSk -w " %{http_code}" -H "Referer: https://q.$1" \
+      --data-urlencode "username=$u" --data-urlencode "password=$p" "https://q.$1/api/v2/auth/login"' - "$domain") ||
+    die "qbittorrent WebUI not reachable on https://q.$domain"
+  # 204 on success, 401 on bad credentials.
+  [[ $out == " 204" ]] || die "qbittorrent rejected Sonarr's login: $out"
+
+  # Configarr (re)creates Sonarr's download client; run it now instead of
+  # waiting for the schedule.
+  log "sonarr: arr-config job with the download client enabled"
+  local job
+  job=arr-config-verify-$(date +%s)
+  kubectl -n arr create job --from=cronjob/arr-config "$job" >/dev/null
+  deadline=$((SECONDS + 600))
+  until [[ $(kubectl -n arr get job "$job" -o jsonpath='{.status.succeeded}') == 1 ]]; do
+    if [[ $(kubectl -n arr get job "$job" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}') == True ]] ||
+      ((SECONDS >= deadline)); then
+      kubectl -n arr logs "job/$job" --all-containers --tail=30 >&2 || true
+      kubectl -n arr delete job "$job" --wait=false >/dev/null
+      die "arr-config job $job did not succeed"
+    fi
+    sleep 5
+  done
+  kubectl -n arr delete job "$job" --wait=false >/dev/null
+
+  log "sonarr: download client test"
+  # shellcheck disable=SC2016
+  out=$(kubectl -n arr get secret arr -o jsonpath='{.data.sonarr_api_key}' | base64 -d |
+    endpoint_stdin sh -c 'read -r k; curl -fsSk -X POST -H "X-Api-Key: $k" "https://sonarr.$1/api/v3/downloadclient/testall"' - "$domain") ||
+    die "sonarr download client test request failed"
+  jq -e 'length > 0 and all(.isValid)' <<<"$out" >/dev/null || die "sonarr download client test failed: $out"
+}
+
+endpoint() { kubectl -n local-fixtures exec deployment/vpn-endpoint -c wireguard -- "$@"; }
+endpoint_stdin() { kubectl -n local-fixtures exec -i deployment/vpn-endpoint -c wireguard -- "$@"; }
+qbittorrent() { kubectl -n gluetun exec deployment/gluetun -c qbittorrent -- "$@"; }
+# Bytes the VPN endpoint sent to gluetun.
+endpoint_tx() { endpoint wg show wg0 transfer | awk '{print $3}'; }
+
 # Same checks as CI, plus evaluating every NixOS host.
 cmd_check() {
   need kustomize kubeconform nix
@@ -275,6 +414,7 @@ usage: local/cluster.sh <command> [args]
   status        flux + workload health of the local cluster
   check         CI checks (kustomize | kubeconform), nix eval of all hosts, flake check
   diff          read-only diff of the working tree against prod
+  verify        end-to-end checks against local/fixtures (qBittorrent/gluetun)
   kubectl ...   kubectl against the local cluster
   flux ...      flux against the local cluster
   k9s           k9s against the local cluster
@@ -287,7 +427,7 @@ EOF
 cmd=${1:-help}
 shift || true
 case $cmd in
-  up | sync | status | check | diff) "cmd_$cmd" "$@" ;;
+  up | sync | status | check | diff | verify) "cmd_$cmd" "$@" ;;
   kubectl | flux | k9s) require_cluster; exec "$cmd" "$@" ;;
   shell) exec limactl shell "$VM" "$@" ;;
   stop) limactl stop "$VM" ;;

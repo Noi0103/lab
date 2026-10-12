@@ -1,0 +1,20 @@
+# Local-only stand-ins for external services prod depends on. Applied by
+# local/cluster.sh with kubectl (not through Flux), together with the Secrets
+# it generates for them; local/flux/patches points the workloads here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - vpn-endpoint.yaml
+images:
+  - name: wireguard
+    newName: lscr.io/linuxserver/wireguard
+    # renovate: datasource=docker depName=lscr.io/linuxserver/wireguard versioning=regex:^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)-r(?<build>\d+)-ls(?<revision>\d+)$
+    newTag: 1.0.20260223-r0-ls125
+configMapGenerator:
+  # Mounted into qBittorrent's /custom-cont-init.d by the apps patch.
+  - name: qbittorrent-init
+    namespace: gluetun
+    files:
+      - qbittorrent-login.sh
+    options:
+      disableNameSuffixHash: true
