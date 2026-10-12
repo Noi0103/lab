@@ -46,7 +46,7 @@ in
       users = [
         {
           name = "admin";
-          password = "";
+          password = "@ADMIN_HASH@"; # replaced in preStart
         }
       ];
 
@@ -88,9 +88,12 @@ in
     preStart = lib.mkAfter ''
       pw=$(<"$CREDENTIALS_DIRECTORY/adminpw")
       HASH=$(printf '%s' "$pw" | ${pkgs.mkpasswd}/bin/mkpasswd -m bcrypt --stdin)
-      export HASH
-      ${pkgs.yq-go}/bin/yq -i '.users[0].password = strenv(HASH)' \
-        "$STATE_DIRECTORY/AdGuardHome.yaml"
+      # No in-place edit (sed -i, yq -i): those fchown the new file, and the
+      # module's SystemCallFilter (~@privileged) kills that with SIGSYS.
+      # bcrypt hashes never contain '|' or '&'.
+      cfg="$STATE_DIRECTORY/AdGuardHome.yaml"
+      sed "s|@ADMIN_HASH@|$HASH|" "$cfg" > "$cfg.tmp"
+      mv "$cfg.tmp" "$cfg"
     '';
   };
 }
